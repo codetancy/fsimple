@@ -1,7 +1,5 @@
 local M = {
-  window = -1,
   buffer = -1,
-  channel = -1
 }
 
 local commands = {
@@ -36,7 +34,6 @@ local focus_window = function(buf_id)
   end
 end
 
-
 local run_cmd = function(buf_id)
   local exec = function(cmd)
     return vim.api.nvim_buf_call(buf_id, function()
@@ -62,21 +59,49 @@ local fsi = function()
   M.buffer = buf_id
 end
 
-local get_current_line = function()
-  return vim.trim(vim.api.nvim_get_current_line()) .. ";;" .. "\n"
+local add_termination = function(cmd)
+  return cmd .. "\n" .. ";;" .. "\n"
 end
 
 local fsi_line = function()
-  fsi()
-
-  vim.defer_fn(function()
+  local send_current_line = function()
     -- We can assume that the buffer is validated because
     -- fsi is called prior
     local buf_id = M.buffer
     local chn = vim.bo[buf_id].channel
-    vim.api.nvim_chan_send(chn, get_current_line())
-  end, 1000)
+
+    local cmd = vim.api.nvim_get_current_line()
+    vim.api.nvim_chan_send(chn, add_termination(cmd))
+  end
+
+  fsi()
+  vim.defer_fn(send_current_line, 1000)
 end
 
-vim.api.nvim_create_user_command("Fsi", function() fsi() end, {})
-vim.api.nvim_create_user_command("FsiLine", function() fsi_line() end, {})
+local fsi_select = function()
+  local send_selection = function()
+    -- We can assume that the buffer is validated because
+    -- fsi is called prior
+    local buf_id = M.buffer
+    local chn = vim.bo[buf_id].channel
+
+    -- Whenever we select in visual mode, the <> marks are saved
+    -- See :marks for the last selection
+    local open = vim.api.nvim_buf_get_mark(0, "<")
+    local close = vim.api.nvim_buf_get_mark(0, ">")
+    -- Alternatively, we could have yanked selection to a register
+
+    local lines = vim.api.nvim_buf_get_lines(0, open[1] - 1, close[1], true)
+    local cmd = table.concat(lines, '\n')
+    vim.api.nvim_chan_send(chn, add_termination(cmd))
+  end
+
+  fsi()
+  vim.defer_fn(send_selection, 1000)
+end
+
+vim.api.nvim_create_user_command("Fsi", fsi, {})
+vim.api.nvim_create_user_command("FsiLine", fsi_line, {})
+vim.api.nvim_create_user_command("FsiSelect", fsi_select, {})
+-- TODO: Create cmd for sending entire buffer
+-- TODO: Update line cmd for accepting number of lines
